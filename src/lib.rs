@@ -281,6 +281,25 @@ macro_rules! mopafy {
             pub unsafe fn downcast_unchecked<T: $trait_<$($args),*>>(self: Box<Self>) -> Box<T> {
                 Box::from_raw(Box::into_raw(self) as *mut T)
             }
+
+            /// Returns the boxed value if it is of type `T`, or `Err(Self)` if it isn't.
+            #[inline]
+            pub fn downcast_arc<T: $trait_<$($args),*>>(self: std::sync::Arc<Self>) -> $crate::__::Result<std::sync::Arc<T>, std::sync::Arc<Self>> {
+                if self.is::<T>() {
+                    unsafe {
+                        $crate::__::Result::Ok(self.downcast_arc_unchecked())
+                    }
+                } else {
+                    $crate::__::Result::Err(self)
+                }
+            }
+
+            /// Returns the boxed value, blindly assuming it to be of type `T`.
+            /// If you are not *absolutely certain* of `T`, you *must not* call this.
+            #[inline]
+            pub unsafe fn downcast_arc_unchecked<T: $trait_<$($args),*>>(self: std::sync::Arc<Self>) -> std::sync::Arc<T> {
+                std::sync::Arc::from_raw(std::sync::Arc::into_raw(self) as *mut T)
+            }
         }
     };
 
@@ -364,7 +383,9 @@ mod tests {
     struct Chris;
 
     impl Person for Chris {
-        fn weight(&self) -> i16 { -5 /* antigravity device! cool! */ }
+        fn weight(&self) -> i16 {
+            -5 /* antigravity device! cool! */
+        }
     }
 
     trait Parameterized<A, B>: super::Any {
@@ -372,13 +393,13 @@ mod tests {
     }
     mopafy!(Parameterized<A, B>);
 
-    impl <'a, B> Parameterized<&'a i32, B> for Benny {
+    impl<'a, B> Parameterized<&'a i32, B> for Benny {
         fn test(&self, x: &'a i32, _: &B) -> i32 {
             *x
         }
     }
 
-    impl <A, B> Parameterized<A, B> for Chris {
+    impl<A, B> Parameterized<A, B> for Chris {
         fn test(&self, _: A, _: &B) -> i32 {
             0
         }
@@ -386,13 +407,21 @@ mod tests {
 
     #[test]
     fn test_ref() {
-        let benny = Benny { kilograms_of_food: 13 };
+        let benny = Benny {
+            kilograms_of_food: 13,
+        };
         let benny_ptr: *const Benny = &benny;
         let person: &Person = &benny;
 
         assert!(person.is::<Benny>());
-        assert_eq!(person.downcast_ref::<Benny>().map(|x| x as *const Benny), Some(benny_ptr));
-        assert_eq!(unsafe { person.downcast_ref_unchecked::<Benny>() as *const Benny }, benny_ptr);
+        assert_eq!(
+            person.downcast_ref::<Benny>().map(|x| x as *const Benny),
+            Some(benny_ptr)
+        );
+        assert_eq!(
+            unsafe { person.downcast_ref_unchecked::<Benny>() as *const Benny },
+            benny_ptr
+        );
 
         assert!(!person.is::<Chris>());
         assert_eq!(person.downcast_ref::<Chris>(), None);
@@ -400,14 +429,28 @@ mod tests {
 
     #[test]
     fn test_mut() {
-        let mut benny = Benny { kilograms_of_food: 13 };
+        let mut benny = Benny {
+            kilograms_of_food: 13,
+        };
         let benny_ptr: *const Benny = &benny;
         let person: &mut Person = &mut benny;
         assert!(person.is::<Benny>());
-        assert_eq!(person.downcast_ref::<Benny>().map(|x| x as *const Benny), Some(benny_ptr));
-        assert_eq!(person.downcast_mut::<Benny>().map(|x| &*x as *const Benny), Some(benny_ptr));
-        assert_eq!(unsafe { person.downcast_ref_unchecked::<Benny>() as *const Benny }, benny_ptr);
-        assert_eq!(unsafe { &*person.downcast_mut_unchecked::<Benny>() as *const Benny }, benny_ptr);
+        assert_eq!(
+            person.downcast_ref::<Benny>().map(|x| x as *const Benny),
+            Some(benny_ptr)
+        );
+        assert_eq!(
+            person.downcast_mut::<Benny>().map(|x| &*x as *const Benny),
+            Some(benny_ptr)
+        );
+        assert_eq!(
+            unsafe { person.downcast_ref_unchecked::<Benny>() as *const Benny },
+            benny_ptr
+        );
+        assert_eq!(
+            unsafe { &*person.downcast_mut_unchecked::<Benny>() as *const Benny },
+            benny_ptr
+        );
 
         assert!(!person.is::<Chris>());
         assert_eq!(person.downcast_ref::<Chris>(), None);
@@ -416,16 +459,24 @@ mod tests {
 
     #[test]
     fn test_box() {
-        let mut benny = Benny { kilograms_of_food: 13 };
+        let mut benny = Benny {
+            kilograms_of_food: 13,
+        };
         let mut person: Box<Person> = Box::new(benny.clone());
         assert!(person.is::<Benny>());
         assert_eq!(person.downcast_ref::<Benny>(), Some(&benny));
         assert_eq!(person.downcast_mut::<Benny>(), Some(&mut benny));
-        assert_eq!(person.downcast::<Benny>().map(|x| *x).ok(), Some(benny.clone()));
+        assert_eq!(
+            person.downcast::<Benny>().map(|x| *x).ok(),
+            Some(benny.clone())
+        );
 
         person = Box::new(benny.clone());
         assert_eq!(unsafe { person.downcast_ref_unchecked::<Benny>() }, &benny);
-        assert_eq!(unsafe { person.downcast_mut_unchecked::<Benny>() }, &mut benny);
+        assert_eq!(
+            unsafe { person.downcast_mut_unchecked::<Benny>() },
+            &mut benny
+        );
         assert_eq!(unsafe { *person.downcast_unchecked::<Benny>() }, benny);
 
         person = Box::new(benny.clone());
@@ -438,16 +489,24 @@ mod tests {
     #[test]
     fn parameterized() {
         let i123 = 123;
-        let mut benny = Benny { kilograms_of_food: 13 };
+        let mut benny = Benny {
+            kilograms_of_food: 13,
+        };
         let mut person: Box<Parameterized<&i32, String>> = Box::new(benny.clone());
         assert!(person.is::<Benny>());
         assert_eq!(person.downcast_ref::<Benny>(), Some(&benny));
         assert_eq!(person.downcast_mut::<Benny>(), Some(&mut benny));
-        assert_eq!(person.downcast::<Benny>().map(|x| *x).ok(), Some(benny.clone()));
+        assert_eq!(
+            person.downcast::<Benny>().map(|x| *x).ok(),
+            Some(benny.clone())
+        );
 
         person = Box::new(benny.clone());
         assert_eq!(unsafe { person.downcast_ref_unchecked::<Benny>() }, &benny);
-        assert_eq!(unsafe { person.downcast_mut_unchecked::<Benny>() }, &mut benny);
+        assert_eq!(
+            unsafe { person.downcast_mut_unchecked::<Benny>() },
+            &mut benny
+        );
         assert_eq!(unsafe { *person.downcast_unchecked::<Benny>() }, benny);
 
         person = Box::new(benny.clone());
